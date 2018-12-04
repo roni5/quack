@@ -1,135 +1,133 @@
-/**
- *
- */
-import React, { Component } from 'react';
-import SockJS from 'sockjs-client';
-import Stomp from 'stompjs';
-import Config from './Config';
-// import {LineChart} from 'react-d3-basic';
- //import d3 from 'd3';
-// import * as d3 from 'd3';
-// import Moment from 'react-moment';
-//import {Table} from 'react-bootstrap';
-console.log(Config.webSocketEndpoint);
+import React from "react";
+import SockJS from "sockjs-client";
+import Stomp from "stompjs";
+import PropTypes from "prop-types";
 
-class Socket extends Component  {
-  constructor(props, context) {
-    super(props, context);
+class Socket extends React.Component {
+
+  static defaultProps = {
+    onConnect: () => {},
+    onDisconnect: () => {},
+    getRetryInterval: (count) => {return 1000 * count;},
+    headers: {},
+    autoReconnect: true,
+    debug: false
+  }
+
+  static propTypes = {
+    url: PropTypes.string.isRequired,
+    topics: PropTypes.array.isRequired,
+    onConnect: PropTypes.func,
+    onDisconnect: PropTypes.func,
+    getRetryInterval: PropTypes.func,
+    onMessage: PropTypes.func.isRequired,
+    headers: PropTypes.object,
+    autoReconnect: PropTypes.bool,
+    debug: PropTypes.bool
+  }
+
+  constructor(props) {
+    super(props);
 
     this.state = {
-      dht22: {temperature: 0, humidity: 0},
-      dataProvider: [],
-      lastWeekData: []
+      connected: false,
+     
     };
 
-    this.socket = new SockJS(Config.serverURL + Config.webSocketEndpoint);
-    this.stompClient = Stomp.over(this.socket);
-
-    console.log(this.socket)
-    this.stompClient.connect({}, frame => {
-      console.log(`connected, ${frame}!`);
-      this.stompClient.subscribe('/queue/DHT22', data => {
-        console.log(JSON.parse(data.body));
-        console.log(this.stompClient, 'stompy');
-        this.setState({dht22: JSON.parse(data.body)});
-      });
-    });
+    this.subscriptions = new Map();
+    this.retryCount = 0;
   }
 
   componentDidMount() {
-    fetch(`${Config.serverURL}/api/v1/sensor/dht22/fresh/${Config.gatewayId}`).then(response => {
-      return response.json();
-    }).then(json => {
-      this.setState({dht22: json});
-    });
+    this.connect();
+  }
 
-    fetch(`${Config.serverURL}/api/v1/sensor/dht22/continuous/${Config.gatewayId}?sample=1h&range=12h`).then(response => {
-      return response.json();
-    }).then(json => {
-      this.setState({dataProvider: json.items});
-    });
-
-    fetch(`${Config.serverURL}/api/v1/sensor/dht22/continuous/${Config.gatewayId}?sample=1d&range=7d`).then(response => {
-      return response.json();
-    }).then(json => {
-      this.setState({lastWeekData: json.items});
-    });
+  componentWillUnmount() {
+    this.disconnect();
   }
 
   render() {
-    const dht22 = this.state.dht22;
-    const dataProvider = this.state.dataProvider;
-    const lastWeekData = this.state.lastWeekData;
+    return (<div></div>);
+  }
 
-    // const chartSeries = [
-    //   {
-    //     field: 'mean_temperature',
-    //     name: 'Temperature',
-    //     color: '#ff7f0e',
-    //     style: {
-    //       strokeWidth: 2,
-    //       strokeOpacity: 0.2,
-    //       fillOpacity: 0.2
-    //     }
-    //   },
-    //   {
-    //     field: 'mean_humidity',
-    //     name: 'Humidity',
-    //     color: '#65b2ff',
-    //     style: {
-    //       strokeWidth: 2,
-    //       strokeOpacity: 0.2,
-    //       fillOpacity: 0.2
-    //     }
-    //   }
-    // ];
+  _initStompClient = () => {
+    // Websocket held by stompjs can be opened only once
+    this.client = Stomp.over(new SockJS(this.props.url));
+    if (!this.props.debug) {
+      this.client.debug = () => {};
+    }
+  }
 
-    // function LastWeekDataTable(lastWeekData) {
-    //   if (lastWeekData.data) {
-    //     const rows = lastWeekData.data.map((row, i) => {
-    //       return (
-    //         <tr key={i}>
-    //           <td></td>
-    //           <td>{row.min_temperature.toFixed(2)}°C/{row.max_temperature.toFixed(2)}°C</td>
-    //           <td>{row.mean_temperature.toFixed(2)}°C</td>
-    //           <td>{row.min_humidity.toFixed(2)}°C/{row.max_humidity.toFixed(2)}%</td>
-    //           <td>{row.mean_humidity.toFixed(2)}°C</td>
-    //         </tr>
-    //       );
-    //     });
-    //     return (
-    //       <Table responsive condensed>
-    //         <thead>
-    //           <tr>
-    //             <th>day</th>
-    //             <th>temperature min/max</th>
-    //             <th>temperature mean</th>
-    //             <th>humidity min/max</th>
-    //             <th>humidity mean</th>
-    //           </tr>
-    //         </thead>
-    //         <tbody>{rows}</tbody>
-    //       </Table>
-    //     );
-    //   }
-    //   return null;
-    // }
+  _cleanUp = () => {
+    this.setState({ connected: false });
+    this.retryCount = 0;
+    this.subscriptions.clear();
+  }
 
-    // const parseISODate = d3.time.format('%Y-%m-%dT%H:%M:%SZ').parse;
+  _log = (msg) => {
+    if (this.props.debug) {
+      console.log(msg);
+    }
+  }
 
-    // const x = function (d) {
-    //   return parseISODate(d.time);
-    // };
-    return (
-      <div>
-        <h1>Hello</h1>
-        {/* <h3>Temperature: {dht22.temperature.toFixed(2)} °C</h3>
-        <h3>Humidity: {dht22.humidity.toFixed(2)} %</h3>
-        <LineChart width={800} height={200} data={dataProvider} chartSeries={chartSeries} x={x} xScale={"time"} yScale={"linear"}/>
-        <LastWeekDataTable data={lastWeekData}/> */}
-        <h1>Hello</h1>
-      </div>
-    );
+  connect = () => {
+    this._initStompClient();
+    this.client.connect(this.props.headers, () => {
+      this.setState({ connected: true });
+      this.props.topics.forEach((topic) => {
+        this.subscribe(topic);
+      });
+      this.props.onConnect();
+    }, (error) => {
+      if (this.state.connected) {
+        this._cleanUp();
+        // onDisconnect should be called only once per connect
+        this.props.onDisconnect();
+      }
+      if (this.props.autoReconnect) {
+        this._timeoutId = setTimeout(this.connect, this.props.getRetryInterval(this.retryCount++));
+      }
+    });
+  }
+
+  disconnect = () => {
+    // On calling disconnect explicitly no effort will be made to reconnect
+    // Clear timeoutId in case the component is trying to reconnect
+    if (this._timeoutId) {
+      clearTimeout(this._timeoutId);
+    }
+    if (this.state.connected) {
+      this.subscriptions.forEach((subid, topic) => {
+        this.unsubscribe(topic);
+      });
+      this.client.disconnect(() => {
+        this._cleanUp();
+        this.props.onDisconnect();
+        this._log("Stomp client is successfully disconnected!");
+      });
+    }
+  }
+
+  subscribe = (topic) => {
+    let sub = this.client.subscribe(topic, (msg) => {
+      this.props.onMessage(JSON.parse(msg.body));
+    });
+    this.subscriptions.set(topic, sub);
+  }
+
+  unsubscribe = (topic) => {
+    let sub = this.subscriptions.get(topic);
+    sub.unsubscribe();
+    this.subscriptions.delete(topic);
+  }
+
+  // Below methods can be accessed by ref attribute from the parent component
+  sendMessage = (topic, msg, opt_headers = {}) => {
+    if (this.state.connected) {
+      this.client.send(topic, opt_headers, msg);
+    } else {
+      console.error("Send error: SockJsClient is disconnected");
+    }
   }
 }
 
